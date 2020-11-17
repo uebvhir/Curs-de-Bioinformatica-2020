@@ -1,0 +1,164 @@
+---
+title: "Downloading data from GEO"
+author: "UEB Bioinformatics Course"
+date: "November 2020"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r eval=FALSE}
+if (!require(GEOquery)){
+  BiocManager::install("GEOquery")
+}
+```
+
+```{r message=FALSE, warning=FALSE}
+library(GEOquery)
+```
+
+# Querying for GSE datasets
+
+GEO Series are collections of related experiments. The getGEO function can parse very large GSEs quite quickly. 
+
+```{r}
+gse <- getGEO('GSE33126')
+show(gse)
+```
+
+Some datasets on GEO may be derived from different microarray platforms. Therefore the data structure returned from this parsing is a list of different datasets. Usually there will only be one platform and the dataset we want to analyse will be the first object in the list:
+
+```{r}
+#check how many datasets
+length(gse)
+#get the first dataset
+eset <- gse[[1]]
+eset
+```
+
+## Accessing data from the dataset
+
+The dataset is stored as an ExpressionSet object, which a data structure designed to contain the expression data from high-throughput assays (assayData) and their associated metadata such as sample description (phenoData), annotations, metadata about the technology used or the experiment design. The different fields can be accessed using different functions:
+
+* Sample information: use `pData()`
+* Feature (probeset) annotation: use `fData()`
+* Raw or normalized expression data: use `exprs()`
+
+**Sample information:**
+
+Rows correspond to samples and columns to variables of information.
+
+```{r}
+sampleInfo <- pData(eset)
+# select the columns of interest:
+colnames(sampleInfo)
+sampleInfo1 <- sampleInfo[,32:34]
+sampleInfo1
+```
+
+**Annotations**
+
+Rows correspond to features (probesets) and columns to annotations.
+
+```{r}
+annotations <- fData(eset)
+dim(annotations)
+#The annotation from GEO might contain lots of columns that we are not particularly interested in. Here we elect the columns of interest:
+colnames(annotations)
+annotations1 <- annotations[,c("ID", "Entrez_Gene_ID", "Accession", "Symbol")]
+head(annotations1)
+```
+
+**Expression matrix**
+
+Rows correspond to features (probesets) and columns correspond to samples. The expression values are presumably normalized and in log 2 scale (though we must check).
+
+```{r}
+data <- exprs(eset)
+dim(data)
+head(data)
+```
+
+Inspect the data distribution:
+
+```{r}
+#here we must transform the data to log2 scale
+data.log <- log2(data)
+boxplot(data.log, outline=FALSE)
+```
+
+## Exporting the data
+
+We can export the expression data to a csv/xls file for inspection in Excel using the `write.csv2` function.
+
+```{r}
+write.csv2(data, file="GSE33126_matrix.csv")
+```
+
+## Accessing raw data from GEO
+
+If raw data such as .CEL files exist on GEO, you can easily access this dea using the `getGEOSuppFiles()` function. 
+
+# Querying for GDS, GSM or GPL classes
+
+Each of these classes is comprised of a metadata header (taken nearly verbatim from the SOFT format header) and a GEODataTable. The GEODataTable has two simple parts, a Columns part which describes the column headers on the Table part. The following information can be accessed:
+
+* Metadata: use `Meta()`
+* Data table: use `Table()`
+* Column descriptions: use `Columns()`
+
+## Example of querying a GEO Dataset
+
+```{r}
+# Download dataset
+gds <- getGEO("GDS507")
+# Look at metadata
+gds_metadata <- Meta(gds)
+# Get sample information
+gds_tableinfo <- Columns(gds)
+#Get the data table
+gds_data <- Table(gds)
+```
+
+Note that the gds object from above can be converted to an ExpressionSet with function `GDS2eSet()`:
+
+```{r}
+eset_gds <- GDS2eSet(gds,do.log2=TRUE)
+eset_gds
+```
+
+## Example of querying a GEO Sample
+
+```{r}
+gsm <- getGEO("GSM11805")
+# Look at metadata
+gsm_metadata <- Meta(gsm)
+# Get sample information
+gsm_tableinfo <- Columns(gsm)
+#Get the data table
+gsm_data <- Table(gsm)
+```
+
+## Example of querying for a GEO Platform
+
+```{r}
+gpl <- getGEO("GPL6244")
+# Look at metadata
+gpl_metadata <- Meta(gpl)
+# Get table information
+gpl_tableinfo <- Columns(gpl)
+#Get the data table
+gpl_data <- Table(gpl)
+```
+
+
+
