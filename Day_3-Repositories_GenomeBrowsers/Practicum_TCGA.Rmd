@@ -1,0 +1,158 @@
+---
+title: "Downloading data from TCGA"
+author: "UEB Bioinformatics Course"
+date: "November 2020"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r eval=FALSE}
+if (!require(TCGAbiolinks)){
+  BiocManager::install("TCGAbiolinks")
+}
+if (!require(SummarizedExperiment)){
+  BiocManager::install("SummarizedExperiment")
+}
+```
+
+```{r message=FALSE, warning=FALSE}
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+```
+
+# Introduction
+
+* Make a query: You can easily search GDC data using the `GDCquery()` function. The function arguments will be the filters as used in the TCGA portal.
+
+* Get the results table from a query using `getResults()` function.
+
+* Download the files from a query: use function `GDCdownload()` to downloads the files from query into the specified directory (if already downloaded it doesn't do it)
+
+* Prepare a SummarizedExperiment object from the query using `GDCprepare()` function
+
+# General information on available data at GDC
+
+* List of available projects: 
+
+```{r}
+projects <- getGDCprojects()
+head(projects[,c("name", "id")])
+```
+
+* Barcode definitions: 
+
+```{r}
+barcodedef <- TCGAbiolinks:::getBarcodeDefinition()
+head(barcodedef)
+```
+
+* Summary of available data from a project
+
+```{r}
+projectsummary <- TCGAbiolinks:::getProjectSummary("TCGA-COAD")
+projectcategories <- projectsummary$data_categories
+projectcategories
+```
+
+Data types:
+
+```{r}
+tab <- getSampleFilesSummary(project = "TCGA-COAD")
+colnames(tab)
+```
+
+# Example: Querying GDC for RNAseq data on TCGA-COAD project
+
+In this example we will access the harmonized database (legacy = FALSE) and search for all patients with gene expression data for Colon Adenocarcinoma tumor (TCGA-COAD project).
+
+## Make the query
+
+```{r}
+query <- GDCquery(project = "TCGA-COAD", 
+                  data.category = "Transcriptome Profiling",
+                  data.type = "Gene Expression Quantification",
+                  legacy=FALSE)
+```
+
+## Get the results table from the query
+
+```{r}
+results <- getResults(query)
+dim(results)
+#select columns of interest
+colnames(results)
+results1 <- results[,c("type", "experimental_strategy", "data_type", "cases", "analysis_workflow_type", "sample_type", "cases.submitter_id", "sample.submitter_id")]
+head(results1)
+```
+
+## Refine your query before downloading
+
+We will download the HTSeq - Counts from the first 5 samples
+
+```{r}
+#get the barcodes of the first 5 samples
+samplesofinterest <- results1$sample.submitter_id[1:5]
+#make a new query
+query1 <- GDCquery(project = "TCGA-COAD", 
+                  data.category = "Transcriptome Profiling",
+                  data.type = "Gene Expression Quantification",
+                  legacy=FALSE,
+                  workflow.type = "HTSeq - Counts",
+                  barcode=samplesofinterest)
+```
+
+
+## Download data
+
+Downloads the files from query into the specified directory.
+
+```{r}
+#download the files from query into the specified directory
+dir <- getwd()
+GDCdownload(query1, directory=dir)
+```
+
+## Prepare a SummarizedExperiment from the data
+
+```{r}
+SE <- GDCprepare(query1, directory = dir) 
+```
+
+* Sample information
+
+```{r}
+## get phenodata of SummarizedExperiment
+SE_sampleInfo <- as.data.frame(colData(SE))
+dim(SE_sampleInfo)
+#select columns of interest to show
+colnames(SE_sampleInfo)
+head(SE_sampleInfo[,c("patient", "sample", "sample_type", "gender", "ajcc_pathologic_n", "disease_type")])
+```
+
+* Molecular data
+
+```{r}
+SE_data <- assay(SE)
+dim(SE_data)
+head(SE_data)
+```
+
+* Feature annotations
+
+```{r}
+SE_annot <- as.data.frame(rowRanges(SE))
+dim(SE_annot)
+head(SE_annot)
+```
+
+
