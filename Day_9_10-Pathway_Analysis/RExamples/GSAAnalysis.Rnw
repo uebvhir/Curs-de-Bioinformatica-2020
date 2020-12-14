@@ -1,0 +1,191 @@
+<<include=FALSE>>=
+library(knitr)
+opts_chunk$set(fig.path='images/grafic', tidy=FALSE, cache=FALSE, message=FALSE, echo=FALSE, print=FALSE)
+@
+
+\documentclass{article}
+
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage[utf8]{inputenc}
+% \usepackage[spanish]{babel}
+\usepackage{underscore}
+
+\title{Analisis funcional mediante GSA}
+
+\author{Miriam Mota y Alex S\'anchez}
+
+\bibliographystyle{plain}
+
+
+\begin{document}
+
+\maketitle
+
+<<librerias, echo=FALSE, message=FALSE, warning=FALSE, results='hide'>>=
+installifnot <- function (pckgName){
+ if (!(require(pckgName, character.only=TRUE))) {
+ install.packages(pckgName)
+  }else{
+    print(paste("Package", pckgName, "already installed", sep=" "))
+  } 
+}
+installBiocifnot <- function (pckgName){
+ if (!(require(pckgName, character.only=TRUE))) {
+    source("https://bioconductor.org/biocLite.R")
+    biocLite(eval(pckgName), suppressUpdates=TRUE)
+  }else{
+    print(paste("Package", pckgName, "already installed", sep=" "))
+  } 
+}
+installifnot("GSA")
+installBiocifnot("genefilter")
+installBiocifnot("Biobase")
+installBiocifnot("pd.hugene.2.1.st")
+installBiocifnot("hugene20sttranscriptcluster.db")
+@ 
+
+<<preparaDirectorios, message=FALSE>>=
+workingDir <-getwd()
+dataDir <-file.path(workingDir, "dades")
+resultsDir <- file.path(workingDir,"results")
+celfilesDir <- file.path(workingDir,"celfiles")
+setwd(workingDir)
+@
+
+\section{Análisis de la significación biológica (2): \\ Expresión diferencial de conjuntos de genes}
+
+El análisis de enriquecimiento adolece de un problema consistente en que parte de una lista de genes que ha sido truncada por un punto de corte más o menos arbitraria, lo que deja a muchos posibles genes interesantes fuera del análisis.
+
+EL "Gene Set Enrichment Analysis" fue introducido para intentar soslayar esta característica. La idea venía a ser que, aunque a veces un gen dado pudiera no estar diferencialmente expresado, un grupo de genes relacionado con una característica médica (enfermedad) o biológica (proceso) podría tender a mostrar más diferencias entre los grupos en estudio que el resto de los genes. Es decir aunque gen a gen no hubiera expresión diferencial este método podría detectars diferencias a nivel del grupo de genes.
+
+Este método fue introducido por Mootha et alt. A partir del método original se han desarrollado múltiples variaciones. Aquí presentamos la propuesta por Efron y Tibshirani.
+
+Este método necesita
+\begin{itemize}
+  \item Una matriz de expresión, con una fila por gen, y una columna por muestra
+  \item Un vector de condiciones experimentales
+  \item Un vector de nombres de los genes
+  \item Una lista de grupos de genes (``genesets'')
+\end{itemize}
+
+\subsection{Las matrices de expresion}
+
+En este analisis se realizara el GSA con varias matrices de expresion, cada una de las cuales es un subconjunto de la matriz general.
+<<dades>>=
+load(file=file.path(dataDir, "normalizedData.Rda"))
+targets <- read.table(file=file.path(dataDir, "targets.SER249.txt"), head=TRUE, row.names=1)
+sum(colnames(exprs(my.norm))!=rownames(targets))
+pData(my.norm)<-targets
+colnames(exprs(my.norm))<-pData(my.norm)$ShortName
+@
+
+En primer lugar se filtra la matriz para conservar únicamente los genes con Entrez, y únicamente con la sonda de mayor variabilidad
+
+<<filterAll>>=
+nrow(exprs( my.norm))
+annotation(my.norm) <- "hugene20sttranscriptcluster.db"
+my.norm.unique <- featureFilter(my.norm)
+nrow(exprs(my.norm.unique))
+@
+
+A continuación se prepara una lista de matrices de expresión, cada una con únicamente las muestras que participan de las comparaciones apareadas.
+
+<<listaMatrices>>=
+listMats<-list()
+listVecs<-list()
+filenames<-rownames(pData(my.norm.unique))
+sum(filenames!=rownames(targets))
+matNames<-colnames(targets)[9:14]
+for (i in 1:length(matNames)){
+  subsetEset <-my.norm.unique[, targets[,8+i]!=0]
+  cat(matNames[i],"\t", as.character(pData(subsetEset)$Grupo), "\n")
+  listMats[[i]] <-exprs(subsetEset)
+  listVecs[[i]] <-pData(subsetEset)[,8+i]
+}
+names(listMats)<-names(listVecs)<- matNames
+# lapply(listMats, function(x) colnames(x))
+# lapply(listVecs, show)
+@
+
+Es decir disponemos de varias matrices de expresión cuyas columnas corresponden a los puntos T3 y T12 de las muestras de una condición (PH, PN, LH o LN) dada y dos matrices de expresión con todas las muestras que agruparemos para comparar "P" con "N" o "H" con "L".
+<<showMats>>=
+lapply(listMats, dim)
+@
+
+\subsection{Las listas de genes}
+
+Los conjuntos de genes con que vamos a contrastar nuestros datos han sido sugeridos por los investigadores
+<<preparaGenests>>=
+require(annotate)
+require(hgu133plus2.db)
+geneSets <- read.csv(file.path(dataDir, "PBTs_all_affy.csv"))
+
+## gene sets a comparar amb cadascuna de les toptable
+gsEntrez <- list()
+for (i in 1:dim(geneSets)[2]) {
+  gs <- as.character(geneSets[,i])
+  gs <- gs[gs != ""]
+  gsE <- getEG(gs, data = "hgu133plus2.db")
+  gsEntrez[[colnames(geneSets[i])]] <- unique(gsE[!is.na(gsE)])
+}
+
+genesetsNames <- names(gsEntrez)
+# lapply(gsEntrez, head)
+@
+
+Finalmente necesitamos disponer de la lista de los nombres de los genes en el mismo tipo de símbolo qen que se han codificado los "geneSets". 
+En este caso se ha utilizado el identificador "Entrez" y la lista de genes será la misma para todas las matrices de expresión analizadas.
+
+<<prepareGSEA>>=
+entrezs<-getEG(rownames(exprs(my.norm.unique)), "hugene20sttranscriptcluster.db")
+@
+
+Una vez recopilados los componentes necesarios se ejecuta la llamada al método \texttt{GSA}. Dado que las cuatro primeras comparaciones se basan simplemente en la matriz de diferencias entre T12 y T3 mientras que las dos últimas se basan en hacer "diferencias entre diferencias" las llevaremos a cabo separadamente (pues el programa realiza de forma distinta las comparaciones "apareadas" o "no apareadas".
+
+<<execGSA, message=FALSE, warning=FALSE>>=
+require(GSA)
+for (i in 1:4){
+  xAB <-listMats[[i]]
+  yAB <- listVecs[[i]]
+  con    <- textConnection('stdout', 'wr', local = TRUE)
+  sink(con)
+  GSA.obj<-GSA(xAB, yAB, genenames=entrezs, genesets=gsEntrez,  resp.type="Two class paired", 
+               nperms=200) # Provar amb 1000?
+  sink()
+  cat("\nConjuntos de genes que aparecen en la comparacion: ",matNames[i],"\n")
+  cat("=====================================================================","\n")  
+  show(GSA.listsets(GSA.obj, geneset.names=genesetsNames, FDRcut=.5))
+}
+for (i in 5:6){
+   xAB <-listMats[[i]]
+  yAB <- listVecs[[i]]
+  con    <- textConnection('stdout', 'wr', local = TRUE)
+  sink(con)
+  GSA.obj<-GSA(xAB, yAB, genenames=entrezs, genesets=gsEntrez,  resp.type="Two class unpaired", 
+               nperms=200)  # Provar amb 1000?
+  sink()
+  cat("\nConjuntos de genes que aparecen en la comparacion: ",matNames[i],"\n")
+  cat("=====================================================================","\n")  
+  show(GSA.listsets(GSA.obj, geneset.names=genesetsNames, FDRcut=.5))
+}
+@
+
+Si en vez de usar una lista ``ad-hoc" de genesets se desea utilizar conjuntos públicos, pueden descargarse de sitios como el Broad Institute \url{http://software.broadinstitute.org/gsea/downloads.jsp} en formato \texttt{.gmt}.
+
+En este ejemplo se utiliza el conjunto de grupos de genes definidos por los pathways de KEGG.
+
+<<GSAbyKEGG, eval=FALSE>>=
+geneset.obj <- GSA.read.gmt(file.path(dataDir,"c2.cp.kegg.v5.1.entrez.gmt"))
+require(GSA)
+for (i in 1:length(listMats)){
+  xAB <-listMats[[i]]
+  yAB <- listVecs[[i]]
+  GSA.obj<-GSA(xAB, yAB, genenames=entrezs, genesets=geneset.obj$genesets,  resp.type="Two class paired", nperms=100)
+  show(GSA.listsets(GSA.obj, geneset.names=geneset.obj$geneset.names, FDRcut=.5))
+}
+@
+
+
+\end{document}
