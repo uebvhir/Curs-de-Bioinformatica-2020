@@ -1,0 +1,61 @@
+---
+title: "Functional Analysis of Gene Lists - Exercises"
+author: "Mireia Ferrer, Ricardo Gonzalo i Alex Sanchez"
+date: "16/12/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This document lists some exercises that can be done with R/Bioconductor or using standalone or web tools.
+
+# Preparing a gene list from a "top table"
+
+- Obtain a file from where you can extract some genes following a "reasonable" criteria.
+- Select 
+    - The list of genes with a p-value less than 0.01/0.05
+    - The list of genes with an adjusted p-value less than 0.05/0.15
+    - The list of genes with an adjusted p-value less than 0.05/0.015 and an absolute (logFC) greater than 1.5
+    
+```{r}
+ExpressAndTop_AvsB <- read.csv2("ExpressAndTop_AvsB.csv2")
+library(dplyr)
+topTabPvalLT01 <- filter(ExpressAndTop_AvsB, P.Value < 0.01)
+entrezsPvalLT01 <- select(topTabPvalLT01, EntrezsA)
+entrezsPvalLT01Bis <- ExpressAndTop_AvsB %>% 
+  filter( P.Value < 0.01) %>% select(EntrezsA)
+entrezsAdjPvalLT05 <- ExpressAndTop_AvsB %>% 
+  filter( adj.P.Val < 0.05) %>% select(EntrezsA)
+entrezsAdjPvalLT05logFCGT1.5 <- ExpressAndTop_AvsB %>% 
+  filter( adj.P.Val < 0.05, abs(logFC) > 1.5) %>% select(EntrezsA)
+
+```
+
+- Repeat the exercise with a file of your own (for example the output of the analysis of the `airwayy` use case).
+
+# Navigating the Gene Ontology
+
+- The GO can be used to search for annotations, gene (products) or GO Terms
+
+- Go to the GO web site and search for
+
+    - Annotations related to psoriasis
+    - Genes related with term psoriasis
+    
+# Enrichment analysis of a gene list
+
+- Select a list of genes (ex. genes with an adjusted p-value < 0.05")
+- Paste them into the GO Enrichment Analysis box in the GO web site
+
+```{r}
+write.table(entrezsAdjPvalLT05logFCGT1.5, file="genes.txt", sep="\t", 
+            row.names=FALSE, col.names = FALSE)
+```
+
+- Repeat the exercise with a gene list of your own (for example a list that you have prepared with the output of the analysis of the `airwayy` use case).
