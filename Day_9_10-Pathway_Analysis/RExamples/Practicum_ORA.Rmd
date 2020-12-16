@@ -1,0 +1,139 @@
+---
+title: "Practicum_EnrichmentAnalysis"
+author: "UEB"
+date: "December 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load RNA-seq data
+
+```{r eval=FALSE}
+##Load the data
+library("airway")
+
+```
+
+```{r eval=FALSE}
+data(gse)
+gse$cell <- gse$donor
+gse$dex <- gse$condition
+levels(gse$dex) 
+levels(gse$dex) <- c("untrt", "trt")
+levels(gse$dex)
+```
+
+# Perform DEA
+
+```{r eval=FALSE}
+library("DESeq2")
+dds <- DESeqDataSet(gse, design = ~ cell + dex)
+dds <- dds[rowSums(counts(dds)) > 1, ]
+dds <- DESeq(dds, parallel =TRUE)
+```
+
+```{r eval=FALSE}
+res <- results(dds, contrast=c("dex","trt","untrt"))
+res <- subset(res, !is.na(padj))
+res
+rownames(res) <- substr(rownames(res), 1, 15)
+write.csv(res, file="topTab_airway.csv")
+```
+
+# Load the list of genes of interest (eg. top table)
+
+```{r}
+toptab <- read.csv(file="topTab_airway.csv", row.names=1, header=TRUE)
+head(toptab)
+toptab <- toptab[order(toptab$pvalue),]
+head(toptab)
+```
+
+# Annotation
+
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+
+columns(org.Hs.eg.db)
+ens.str <- rownames(toptab)
+toptab$symbol <- mapIds(org.Hs.eg.db,
+                     keys=ens.str,
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+toptab$entrez <- mapIds(org.Hs.eg.db,
+                     keys=ens.str,
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+sum(is.na(toptab$entrez))
+sum(is.na(toptab$symbol))
+toptab <- subset(toptab, !is.na(entrez))
+sum(duplicated(toptab$entrez))
+toptab <- subset(toptab, !duplicated(entrez))
+#Save annotated toptab
+write.csv(toptab, file="toptab_airway_annot.csv")
+```
+
+# Selection of differentially expressed genes (DEG)
+
+```{r}
+UPgenes <- subset(toptab, padj < 0.05 & log2FoldChange > 2)
+DOWNgenes <- subset(toptab, padj < 0.05 & log2FoldChange < -2)
+```
+
+# Overrepresentation analysis using gProfiler
+
+```{r}
+library(gprofiler2)
+gostresUP <- gost(query = UPgenes$entrez, organism = "hsapiens")
+gostresUP.res <- gostresUP$result
+```
+
+# Overrepresentation analysis using clusterProfiler
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+```
+
+```{r}
+#available annotations
+keytypes(org.Hs.eg.db)
+head(UPgenes)
+## Run GO enrichment analysis 
+ego <- enrichGO(gene = rownames(UPgenes), 
+                # universe = allOE_genes,
+                keyType = "ENSEMBL",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.05, 
+                readable = TRUE)
+# Output results from GO analysis to a table
+cluster_summary <- data.frame(ego)
+
+write.csv(cluster_summary, "clusterProfiler_UpGO.csv")
+```
+
+Visualization of results
+
+```{r}
+## Dotplot 
+dotplot(ego, showCategory=50)
+```
+
+```{r}
+## Enrichmap clusters the 50 most significant (by padj) GO terms to visualize relationships between terms
+emapplot(ego, showCategory = 50)
+```
+
+For overrepresentation analysis based on Reactome Pathways database we would use function `enrichPathway` instead of `enrichGO`.
+
+
+
+
